@@ -16,10 +16,10 @@ Cowart is a local infinite-canvas plugin for Codex. It brings a tldraw-powered c
 
 ### Ask Codex To Install It
 
-Send the following message to Codex, replacing `<REPO_URL>` with this repository URL:
+Send the following message to Codex:
 
 ```text
-Please install the Cowart Codex plugin from <REPO_URL>.
+Please install the Cowart Codex plugin from https://github.com/zhongerxin/cowart.git.
 Clone the repository into the local plugin directory, verify that .codex-plugin/plugin.json exists,
 add the plugin to the personal marketplace, then run codex plugin add cowart@personal.
 After installing, validate the plugin and tell me whether I should start a new conversation to load the new skills and MCP tools.
@@ -31,7 +31,7 @@ Clone the plugin into the default location referenced by the Codex personal mark
 
 ```bash
 mkdir -p ~/.agents/plugins/plugins
-git clone <REPO_URL> ~/.agents/plugins/plugins/cowart
+git clone https://github.com/zhongerxin/cowart.git ~/.agents/plugins/plugins/cowart
 cd ~/.agents/plugins/plugins/cowart
 npm install
 npm run build
@@ -93,6 +93,8 @@ canvas/pages/<page-id>/cowart-canvas.json
 canvas/pages/<page-id>/assets/
 ```
 
+![Open Cowart canvas in Codex](assets/open-canvas.png)
+
 ### Generate A New Image
 
 1. Open the Cowart canvas.
@@ -105,6 +107,8 @@ Generate a new image into the selected Cowart AI image holder.
 
 Codex reads the selected holder, matches its aspect ratio, generates the image, and inserts it into the holder.
 
+![Generate and insert a new image with Cowart](assets/generate-image.png)
+
 ### Generate From An Annotation Screenshot
 
 1. Annotate an image on the Cowart canvas.
@@ -116,6 +120,8 @@ Use my Cowart annotation screenshot to generate a clean revised image beside the
 ```
 
 Codex reads the notes and arrows in the screenshot, generates a clean revised image without annotation artifacts, and places it beside the original. The original image and annotations are not deleted or moved.
+
+![Generate a revised image from a Cowart annotation screenshot](assets/annotation-edit.png)
 
 ## Skills
 

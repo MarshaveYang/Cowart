@@ -16,10 +16,10 @@ English README: [README.en.md](README.en.md)
 
 ### 让 Codex 自动安装
 
-把下面这段发给 Codex，并把 `<REPO_URL>` 换成这个仓库的 Git 地址：
+把下面这段发给 Codex：
 
 ```text
-请从 <REPO_URL> 安装 Cowart Codex 插件。
+请从 https://github.com/zhongerxin/cowart.git 安装 Cowart Codex 插件。
 请 clone 仓库到本地插件目录，确认 .codex-plugin/plugin.json 存在，
 把插件加入 personal marketplace，然后运行 codex plugin add cowart@personal。
 安装后请校验插件，并告诉我是否需要开启一个新对话来加载新技能和 MCP 工具。
@@ -31,7 +31,7 @@ English README: [README.en.md](README.en.md)
 
 ```bash
 mkdir -p ~/.agents/plugins/plugins
-git clone <REPO_URL> ~/.agents/plugins/plugins/cowart
+git clone https://github.com/zhongerxin/cowart.git ~/.agents/plugins/plugins/cowart
 cd ~/.agents/plugins/plugins/cowart
 npm install
 npm run build
@@ -93,6 +93,8 @@ canvas/pages/<page-id>/cowart-canvas.json
 canvas/pages/<page-id>/assets/
 ```
 
+![在 Codex 中打开 Cowart 画布](assets/open-canvas.png)
+
 ### 生成新图
 
 1. 打开 Cowart 画布。
@@ -105,6 +107,8 @@ Generate a new image into the selected Cowart AI image holder.
 
 Codex 会读取选中的 holder，按它的比例生成图片，并插入到 holder 中。
 
+![使用 Cowart 生成并插入新图](assets/generate-image.png)
+
 ### 根据标注图生成新图
 
 1. 在 Cowart 画布中对图片做标注。
@@ -116,6 +120,8 @@ Use my Cowart annotation screenshot to generate a clean revised image beside the
 ```
 
 Codex 会读取截图里的标注和箭头，生成去掉标注痕迹的新图，并把结果放在原图旁边。原图和标注不会被删除或移动。
+
+![根据 Cowart 标注截图生成修订图](assets/annotation-edit.png)
 
 ## 技能
 
