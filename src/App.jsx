@@ -43,9 +43,19 @@ import { AllSelection } from '@tiptap/pm/state'
 import 'tldraw/tldraw.css'
 import { useCallback, useEffect, useState } from 'react'
 
-const CANVAS_ENDPOINT = '/api/canvas'
-const SELECTION_ENDPOINT = '/api/selection'
-const VIEW_STATE_ENDPOINT = '/api/view-state'
+const COWART_BASE_URL =
+  typeof window !== 'undefined' && typeof window.__COWART_CANVAS_BASE_URL__ === 'string'
+    ? window.__COWART_CANVAS_BASE_URL__
+    : ''
+
+function cowartUrl(path) {
+  if (!COWART_BASE_URL) return path
+  return new URL(path, COWART_BASE_URL).toString()
+}
+
+const CANVAS_ENDPOINT = cowartUrl('/api/canvas')
+const SELECTION_ENDPOINT = cowartUrl('/api/selection')
+const VIEW_STATE_ENDPOINT = cowartUrl('/api/view-state')
 const SELECTION_STATE_ELEMENT_ID = 'cowart-selection-state'
 const AI_IMAGE_TOOL_ID = 'ai-image'
 const AI_IMAGE_HOLDER_LABEL = 'AI 图片'

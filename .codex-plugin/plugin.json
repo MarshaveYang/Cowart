@@ -1,7 +1,7 @@
 {
   "name": "cowart",
   "version": "0.1.1",
-  "description": "Open a local tldraw infinite canvas in Codex.",
+  "description": "Open a local tldraw infinite canvas as a Codex widget.",
   "author": {
     "name": "Local developer"
   },
@@ -9,8 +9,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Cowart",
-    "shortDescription": "Open a tldraw infinite canvas in Codex.",
-    "longDescription": "Cowart provides a local web canvas powered by tldraw and a skill that opens it in the Codex in-app browser.",
+    "shortDescription": "Open a tldraw infinite canvas as a Codex widget.",
+    "longDescription": "Cowart provides a local web canvas powered by tldraw and a widget entry that embeds the running canvas inside Codex.",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": ["Interactive", "Local web service"],

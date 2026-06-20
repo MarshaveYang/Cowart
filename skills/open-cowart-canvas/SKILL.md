@@ -1,6 +1,6 @@
 ---
 name: open-cowart-canvas
-description: Open the Cowart local web service, a tldraw-powered infinite canvas, in the Codex in-app browser. Use when the user asks to open, launch, view, or work in the Cowart canvas or wants an infinite canvas inside Codex.
+description: Open the Cowart local web service, a tldraw-powered infinite canvas, in a Codex widget. Use when the user asks to open, launch, view, or work in the Cowart canvas or wants an infinite canvas inside Codex.
 ---
 
 # Open Cowart Canvas
@@ -29,7 +29,16 @@ If `COWART_PORT` is set before starting the script, open that port instead:
 COWART_PORT=43218 /Users/bytedance/plugins/cowart/scripts/start-canvas.sh /path/to/user/codex-project
 ```
 
-Then use the in-app browser to open the URL. If the browser-control skill is available, use it for the navigation. Otherwise, give the user the local URL.
+Then render the Codex widget by calling the Cowart MCP `render_cowart_canvas_widget` tool with the actual local URL and the active project directory:
+
+```json
+{
+  "canvasUrl": "http://127.0.0.1:43217/",
+  "projectDir": "/path/to/user/codex-project"
+}
+```
+
+The widget embeds the running local Cowart service. If the widget tool is unavailable, give the user the local URL as the fallback.
 
 ## Notes
 
