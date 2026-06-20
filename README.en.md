@@ -20,7 +20,7 @@ Send the following message to Codex:
 
 ```text
 Please install the Cowart Codex plugin from https://github.com/zhongerxin/cowart.git.
-Clone the repository into the local plugin directory, verify that .codex-plugin/plugin.json exists,
+Clone the repository into ~/plugins/cowart, verify that .codex-plugin/plugin.json exists,
 add the plugin to the personal marketplace, then run codex plugin add cowart@personal.
 After installing, validate the plugin and tell me whether I should start a new conversation to load the new skills and MCP tools.
 ```
@@ -30,9 +30,9 @@ After installing, validate the plugin and tell me whether I should start a new c
 Clone the plugin into the default location referenced by the Codex personal marketplace:
 
 ```bash
-mkdir -p ~/.agents/plugins/plugins
-git clone https://github.com/zhongerxin/cowart.git ~/.agents/plugins/plugins/cowart
-cd ~/.agents/plugins/plugins/cowart
+mkdir -p ~/plugins
+git clone https://github.com/zhongerxin/cowart.git ~/plugins/cowart
+cd ~/plugins/cowart
 npm install
 npm run build
 ```

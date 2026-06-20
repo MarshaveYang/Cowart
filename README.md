@@ -20,7 +20,7 @@ English README: [README.en.md](README.en.md)
 
 ```text
 请从 https://github.com/zhongerxin/cowart.git 安装 Cowart Codex 插件。
-请 clone 仓库到本地插件目录，确认 .codex-plugin/plugin.json 存在，
+请 clone 仓库到 ~/plugins/cowart，确认 .codex-plugin/plugin.json 存在，
 把插件加入 personal marketplace，然后运行 codex plugin add cowart@personal。
 安装后请校验插件，并告诉我是否需要开启一个新对话来加载新技能和 MCP 工具。
 ```
@@ -30,9 +30,9 @@ English README: [README.en.md](README.en.md)
 推荐把插件 clone 到 Codex personal marketplace 默认会引用的位置：
 
 ```bash
-mkdir -p ~/.agents/plugins/plugins
-git clone https://github.com/zhongerxin/cowart.git ~/.agents/plugins/plugins/cowart
-cd ~/.agents/plugins/plugins/cowart
+mkdir -p ~/plugins
+git clone https://github.com/zhongerxin/cowart.git ~/plugins/cowart
+cd ~/plugins/cowart
 npm install
 npm run build
 ```
