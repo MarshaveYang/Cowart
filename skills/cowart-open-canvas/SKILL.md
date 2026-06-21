@@ -29,7 +29,8 @@ const os = await import("node:os");
 const path = await import("node:path");
 const fs = await import("node:fs/promises");
 
-const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
+const homeDir = nodeRepl.homeDir ?? os.homedir();
+const codexHome = globalThis.process?.env?.CODEX_HOME ?? path.join(homeDir, ".codex");
 const browserRoot = path.join(codexHome, "plugins", "cache", "openai-bundled", "browser");
 const versions = (await fs.readdir(browserRoot)).sort();
 const browserClientPath = path.join(browserRoot, versions.at(-1), "scripts", "browser-client.mjs");
@@ -44,7 +45,13 @@ nodeRepl.write(await browser.documentation());
 
 ```js
 await (await browser.capabilities.get("visibility")).set(true);
-globalThis.tab = (await browser.tabs.selected()) ?? await browser.tabs.new();
+let selectedTab = null;
+try {
+  selectedTab = await browser.tabs.selected();
+} catch (error) {
+  if (!String(error?.message ?? error).includes("No active tab")) throw error;
+}
+globalThis.tab = selectedTab ?? await browser.tabs.new();
 if ((await tab.url()) !== url) {
   await tab.goto(url);
 }

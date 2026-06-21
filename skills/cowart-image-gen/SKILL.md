@@ -1,11 +1,11 @@
 ---
 name: cowart-image-gen
-description: Generate a final AI bitmap into the selected Cowart "AI 图片" holder, including any requested in-image text by default. Use when the user asks Codex to create, fill, replace, or place an AI-generated image inside the currently selected AI image placeholder on a Cowart canvas.
+description: Generate a final AI bitmap for the Cowart canvas, including any requested in-image text by default. Use when the user asks Codex to create, fill, replace, or place an AI-generated image on a Cowart canvas. If an AI 图片 holder is selected, fill that holder; otherwise generate the image and insert it into the current Cowart page.
 ---
 
 # Cowart Image Gen
 
-Use this skill when the selected Cowart canvas shape is an `AI 图片` holder created by the Cowart toolbar.
+Use this skill when the user wants an AI-generated image placed onto the Cowart canvas. A selected `AI 图片` holder gives a precise size and placement target, but it is not required.
 
 ## Preconditions
 
@@ -39,7 +39,7 @@ meta flag. Support both shapes.
 
    You can also use the Cowart MCP `get_cowart_selection` tool if it is available.
 
-2. Continue only when exactly one selected shape has either:
+2. Check whether exactly one selected shape is an AI image holder. A holder is any selected shape with either:
 
    ```text
    isAiImageHolder: true
@@ -51,9 +51,11 @@ meta flag. Support both shapes.
    meta.cowartAiImageHolder: true
    ```
 
-   If not, ask the user to select an `AI 图片` holder.
+   If yes, use the holder workflow below. If not, do not ask the user to select a holder; use the standalone workflow below and insert the generated image into the current Cowart page.
 
-3. Use the selected holder's `props.w` and `props.h` as the size contract. The generated image should match the holder aspect ratio as closely as possible.
+3. Choose the placement workflow.
+
+   Holder workflow: use the selected holder's `props.w` and `props.h` as the size contract. The generated image should match the holder aspect ratio as closely as possible.
 
    If the holder `type` is `frame`, insert the generated image as a child of the frame:
 
@@ -67,6 +69,8 @@ meta flag. Support both shapes.
 
    If the holder is a legacy `geo` rectangle, keep using the legacy placement contract: same `x`, `y`, `rotation`, `parentId`, `props.w`, and `props.h` as the holder.
 
+   Standalone workflow: when no AI holder is selected, generate the image anyway and insert it as a normal image shape on the current page. Prefer the current page from Cowart view state; if there is a selected non-holder shape and it is useful as context, place the image beside it, otherwise place it in a clear page area. Use the generated bitmap's aspect ratio and a practical display width such as 512 canvas units unless the user requested a different size or aspect ratio.
+
 4. Generate the bitmap with the built-in `imagegen` skill unless the user explicitly requests another image path. If the requested asset needs visible copy, labels, poster text, ad text, UI text, or typography, include that text directly in the image generation prompt and let the image model produce the final bitmap. Do not default to generating a text-free background and then adding text locally unless the user explicitly asks for local typography, deterministic text overlay, SVG/vector output, or another non-imagegen layout step.
 
    For project-bound output, copy the selected generated image from `$CODEX_HOME/generated_images/...` into the selected page's asset folder:
@@ -75,7 +79,9 @@ meta flag. Support both shapes.
    canvas/pages/<page-id-without-page-prefix>/assets/
    ```
 
-5. Insert the generated image as a new tldraw image shape exactly over the holder:
+5. Insert the generated image as a new tldraw image shape.
+
+   For the holder workflow, place it exactly over the holder:
 
    - `type`: `image`
    - `parentId`: holder id for frame holders, same as holder parent for legacy geo holders
@@ -84,7 +90,17 @@ meta flag. Support both shapes.
    - `props.assetId`: the new image asset id
    - `meta.cowartGeneratedForAiImageHolder`: holder shape id
 
-6. Do not delete the holder unless the user explicitly asks for replacement. Keeping the holder lets Codex identify the intended slot again later.
+   For the standalone workflow, insert it into the current page as a normal image:
+
+   - `type`: `image`
+   - `parentId`: current page id, unless placing beside a selected non-holder shape requires the same parent
+   - `x`, `y`: a clear page area or beside the selected non-holder shape
+   - `rotation`: `0`
+   - `props.w`, `props.h`: display size matching the generated bitmap aspect ratio
+   - `props.assetId`: the new image asset id
+   - `meta.cowartGeneratedStandalone`: `true`
+
+6. Do not delete the holder unless the user explicitly asks for replacement. Keeping the holder lets Codex identify the intended slot again later. In the standalone workflow, do not create a holder first unless the user explicitly asks for one.
 
 7. Save through Cowart's API or edit the page snapshot carefully:
 
@@ -98,10 +114,11 @@ meta flag. Support both shapes.
    /page-assets/<page-id-without-page-prefix>/<filename>
    ```
 
-8. Refresh or let the browser hot-reload, then confirm the inserted shape id, holder id, final dimensions, and saved asset path.
+8. Refresh or let the browser hot-reload, then confirm the inserted shape id, final dimensions, and saved asset path. Include the holder id only when the holder workflow was used.
 
 ## Notes
 
 - If the holder is a legacy rotated `geo` rectangle, preserve the same `rotation` on the image. For `frame` holders, the frame owns placement and the child image should stay unrotated inside it.
 - If there is already a generated image for the same holder and the user says "替换", remove or update that generated image shape instead of piling another copy on top.
+- Do not refuse generation solely because no `AI 图片` holder is selected. Generate the bitmap and insert it into the current Cowart page.
 - Never overwrite an existing asset file without an explicit replace request; use a timestamped filename.

@@ -12,7 +12,7 @@ export COWART_CANVAS_DIR="$CANVAS_DIR"
 
 cd "$ROOT_DIR"
 
-if [ ! -d node_modules ]; then
+if [ ! -d node_modules ] || [ ! -x node_modules/.bin/vite ]; then
   npm install
 fi
 

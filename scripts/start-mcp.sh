@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$ROOT_DIR"
 
-if [ ! -d node_modules ]; then
+if [ ! -d node_modules ] || [ ! -d node_modules/fractional-indexing ]; then
   npm install
 fi
 
