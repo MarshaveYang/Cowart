@@ -10,10 +10,10 @@ description: Open the Cowart local web service, a tldraw-powered infinite canvas
 1. Start the local Cowart web service with the user's current Codex project directory, and keep the process running:
 
 ```bash
-/Users/bytedance/plugins/cowart/scripts/start-canvas.sh /path/to/user/codex-project
+./scripts/start-canvas.sh /path/to/user/codex-project
 ```
 
-Use the active workspace or project directory from the current Codex session for `/path/to/user/codex-project`. Do not pass the Cowart plugin directory.
+Run this from the Cowart repository root. Use the active workspace or project directory from the current Codex session for `/path/to/user/codex-project`. Do not pass the Cowart repository directory.
 
 2. Open the resulting local URL in the Codex in-app browser when the Browser tool chain is available.
 
@@ -22,10 +22,19 @@ The default URL is `http://127.0.0.1:43217/`. If the service output prints a dif
 Use the Browser plugin's `control-in-app-browser` skill as the source of truth for opening the in-app browser. The correct model-side flow is:
 
 1. Use tool discovery for the Node REPL JavaScript execution tool if it is not already visible. The required callable tool is the `js` execution tool, commonly exposed as `mcp__node_repl__js`; `js_reset` and `js_add_node_module_dir` are not sufficient for browser control.
-2. In a fresh Node REPL session, bootstrap the Browser runtime with the Browser plugin's packaged client, using the absolute `browser-client.mjs` path:
+2. In a fresh Node REPL session, bootstrap the Browser runtime with the Browser plugin's packaged client. Resolve `browser-client.mjs` from the current environment's `CODEX_HOME` (default `~/.codex`) so the skill does not depend on a specific username or plugin version:
 
 ```js
-const { setupBrowserRuntime } = await import("/Users/bytedance/.codex/plugins/cache/openai-bundled/browser/26.616.41845/scripts/browser-client.mjs");
+const os = await import("node:os");
+const path = await import("node:path");
+const fs = await import("node:fs/promises");
+
+const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
+const browserRoot = path.join(codexHome, "plugins", "cache", "openai-bundled", "browser");
+const versions = (await fs.readdir(browserRoot)).sort();
+const browserClientPath = path.join(browserRoot, versions.at(-1), "scripts", "browser-client.mjs");
+
+const { setupBrowserRuntime } = await import(browserClientPath);
 await setupBrowserRuntime({ globals: globalThis });
 globalThis.browser = await agent.browsers.get("iab");
 nodeRepl.write(await browser.documentation());
