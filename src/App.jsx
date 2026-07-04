@@ -1706,7 +1706,7 @@ function CowartAnnotationEditToolbarButton({ imageShapeId }) {
       type="icon"
     >
       <TldrawUiButtonIcon
-        icon={status === 'sent' ? 'check' : status === 'error' ? 'warning-triangle' : 'comment'}
+        icon={status === 'sent' ? 'check' : status === 'error' ? 'warning-triangle' : 'tool-highlight'}
         small
       />
       <span className="cowart-annotation-edit-toolbar-label">{ANNOTATION_EDIT_TOOL_LABEL}</span>
