@@ -5,8 +5,11 @@ import {
   ArrowToolbarItem,
   ArrowUpToolbarItem,
   AssetToolbarItem,
+  Box,
   CheckBoxToolbarItem,
   CloudToolbarItem,
+  DefaultImageToolbar,
+  DefaultImageToolbarContent,
   DefaultToolbar,
   DefaultColorStyle,
   DefaultStylePanel,
@@ -32,7 +35,11 @@ import {
   StarToolbarItem,
   TextToolbarItem,
   Tldraw,
+  TldrawUiButton,
+  TldrawUiButtonIcon,
+  TldrawUiInput,
   TldrawUiMenuToolItem,
+  TldrawUiToolbarButton,
   TriangleToolbarItem,
   XBoxToolbarItem,
   createShapeId,
@@ -40,22 +47,32 @@ import {
   startEditingShapeWithRichText,
   toRichText,
   useEditor,
+  useTranslation,
+  useUiEvents,
   useValue
 } from 'tldraw'
+import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
 import { AllSelection } from '@tiptap/pm/state'
 import 'tldraw/tldraw.css'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import aiFrameToolIconRaw from './assets/ai-frame.svg?raw'
 import annotationToolIconRaw from './assets/tool-comment.svg?raw'
+import {
+  IS_COWART_WIDGET_BUILD,
+  hasCowartWidgetBridge,
+  loadCowartCanvasState,
+  refreshCowartCanvasSnapshot,
+  saveCowartCanvasSnapshot,
+  saveCowartReferenceImage,
+  saveCowartSelectionState,
+  saveCowartViewState
+} from './cowartClient.js'
 import {
   describeSkippedRecord,
   isCanvasSnapshot,
   sanitizeCanvasSnapshotForTldraw
 } from './canvasSnapshot.js'
 
-const CANVAS_ENDPOINT = '/api/canvas'
-const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
-const SELECTION_ENDPOINT = '/api/selection'
-const VIEW_STATE_ENDPOINT = '/api/view-state'
 const SELECTION_STATE_ELEMENT_ID = 'cowart-selection-state'
 const AI_IMAGE_TOOL_ID = 'ai-image'
 const AI_IMAGE_HOLDER_LABEL = 'AI 图片'
@@ -63,6 +80,14 @@ const AI_IMAGE_HOLDER_DEFAULT_W = 512
 const AI_IMAGE_HOLDER_DEFAULT_H = 683
 const AI_IMAGE_SIZE_MIN = 16
 const AI_IMAGE_SIZE_MAX = 8192
+const AI_IMAGE_GENERATION_PANEL_OFFSET = 14
+const AI_IMAGE_GENERATION_PANEL_MIN_W = 520
+const AI_IMAGE_GENERATION_PANEL_MAX_W = 640
+const AI_IMAGE_GENERATION_PANEL_VIEWPORT_MARGIN = 16
+const AI_IMAGE_GENERATION_PANEL_ESTIMATED_H = 226
+const AI_IMAGE_GENERATION_STATUS_RESET_MS = 2200
+const AI_IMAGE_REFERENCE_MAX_FILES = 10
+const SKIPPED_RECORDS_NOTICE_AUTO_HIDE_MS = 5000
 const AI_IMAGE_ASPECT_PRESETS = [
   { id: '1-1', label: '1:1', w: 512, h: 512 },
   { id: '3-2', label: '3:2', w: 768, h: 512 },
@@ -82,6 +107,37 @@ const ANNOTATION_MAX_BEND = 48
 const ANNOTATION_LABEL_POSITION = 0
 const ANNOTATION_SELECT_TEXT_MAX_ATTEMPTS = 8
 const ANNOTATION_SELECT_TEXT_SETTLE_ATTEMPTS = 4
+const ANNOTATION_EDIT_TOOL_LABEL = '按标注修改'
+const ANNOTATION_EDIT_PROMPT = [
+  '[@cowart](plugin://cowart@personal) 按标注修改',
+  '',
+  '请根据这张 Cowart 截图里的标注修改当前选中的图片：',
+  '- 截图包含当前图片，以及连到图片里或图片附近的标注箭头和标注文字。',
+  '- 请把标注文字当作修改要求，生成一张新的干净图片。',
+  '- 不要把标注箭头、标注文字、蓝色选框或工具栏带进最终图片。',
+  '- 保留原图和原标注不动，把新图放到原图旁边。'
+].join('\n')
+const ANNOTATION_EDIT_EXPORT_PADDING = 32
+const ANNOTATION_EDIT_NEAR_MARGIN_MIN = 160
+const ANNOTATION_EDIT_NEAR_MARGIN_MAX = 720
+const ANNOTATION_EDIT_RELATED_TEXT_MARGIN = 120
+const ANNOTATION_EDIT_STATUS_RESET_MS = 2200
+const ANNOTATION_EDIT_COLORS = new Set(['red', 'yellow', 'orange'])
+const AI_IMAGE_GENERATION_PROMPT_PREFIX = [
+  '[@cowart](plugin://cowart@personal) 生成图片',
+  '',
+  '请根据下面的 prompt 生成一张图片，并替换当前选中的 Cowart AI 图片框；最终画布里应留下普通图片形状，不保留 AI 图片框容器。',
+  '如果附带一张或多张参考图，请把参考图作为视觉参考；不要把参考图文件名或任何界面元素画进最终图片。',
+  '不需要选择生图模型，使用 Codex 当前可用的图片生成能力。'
+].join('\n')
+const aiFrameToolIconSvg = aiFrameToolIconRaw.replaceAll('black', 'currentColor')
+const aiFrameToolIcon = (
+  <div
+    aria-hidden="true"
+    className="cowart-ai-frame-tool-icon"
+    dangerouslySetInnerHTML={{ __html: aiFrameToolIconSvg }}
+  />
+)
 const annotationToolIconSvg = annotationToolIconRaw.replaceAll('black', 'currentColor')
 const annotationToolIcon = (
   <div
@@ -89,9 +145,35 @@ const annotationToolIcon = (
     dangerouslySetInnerHTML={{ __html: annotationToolIconSvg }}
   />
 )
+const iconSvgSources = import.meta.glob(
+  '../node_modules/@tldraw/assets/icons/icon/*.svg',
+  { eager: true, query: '?raw', import: 'default' }
+)
+const cowartAssetUrls = buildCowartAssetUrls()
+
+function buildCowartAssetUrls() {
+  const icons = {}
+  for (const [path, source] of Object.entries(iconSvgSources)) {
+    const name = path.split('/').pop().replace(/\.svg$/, '')
+    icons[name] = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(source)))}`
+  }
+  let base = {}
+  try {
+    base = getAssetUrlsByImport()
+  } catch (error) {
+    console.warn('Cowart could not load bundled tldraw asset URLs.', error)
+  }
+  return { ...base, icons: { ...base.icons, ...icons } }
+}
 
 function recordsAreEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right)
+}
+
+const REMOTE_REMOVABLE_RECORD_TYPES = new Set(['asset', 'binding', 'shape'])
+
+function isRemoteRemovableRecord(record) {
+  return REMOTE_REMOVABLE_RECORD_TYPES.has(record?.typeName)
 }
 
 function storeChangedSinceSnapshot(editor, baselineStore) {
@@ -118,18 +200,28 @@ function applyRemoteCanvasSnapshot(editor, snapshot, { preserveLocalChanges = fa
   if (!sanitized.snapshot) return { changedRecords: 0, skippedRecords: sanitized.skippedRecords }
 
   const recordsToPut = Object.values(sanitized.snapshot.store).filter((record) => {
+    if (preserveLocalChanges) return false
     const localRecord = editor.store.get(record.id)
     if (!localRecord) return true
-    if (preserveLocalChanges) return false
     return !recordsAreEqual(localRecord, record)
   })
+  const remoteRecordIds = new Set(Object.keys(sanitized.snapshot.store))
+  const recordsToRemove = preserveLocalChanges
+    ? []
+    : Object.values(editor.store.getStoreSnapshot().store)
+        .filter((record) => isRemoteRemovableRecord(record) && !remoteRecordIds.has(record.id))
+        .map((record) => record.id)
 
-  if (recordsToPut.length === 0) {
+  if (recordsToPut.length === 0 && recordsToRemove.length === 0) {
     return { changedRecords: 0, skippedRecords: sanitized.skippedRecords }
   }
 
   let changedRecords = 0
   editor.store.mergeRemoteChanges(() => {
+    if (recordsToRemove.length > 0) {
+      editor.store.remove(recordsToRemove)
+      changedRecords += recordsToRemove.length
+    }
     for (const record of recordsToPut) {
       try {
         editor.store.put([record])
@@ -152,6 +244,26 @@ function getAiImageHolderMeta() {
 
 function isAiImageHolderShape(shape) {
   return shape?.type === 'frame' && shape.meta?.cowartAiImageHolder === true
+}
+
+function isImageShape(shape) {
+  return shape?.type === 'image'
+}
+
+function isImageShapeRecord(record) {
+  return record?.typeName === 'shape' && record.type === 'image'
+}
+
+function recordValues(records) {
+  return Object.values(records || {})
+}
+
+function collectRemovedImageShapeIds(changes) {
+  const imageShapeIds = []
+  for (const removedRecord of recordValues(changes?.removed)) {
+    if (isImageShapeRecord(removedRecord)) imageShapeIds.push(removedRecord.id)
+  }
+  return imageShapeIds
 }
 
 function isAiImageAspectLocked(shape) {
@@ -373,6 +485,376 @@ function getAnnotationColor(editor) {
   return color === DefaultColorStyle.defaultValue ? ANNOTATION_DEFAULT_COLOR : color
 }
 
+function expandBox(bounds, padding) {
+  return new Box(
+    bounds.x - padding,
+    bounds.y - padding,
+    bounds.w + padding * 2,
+    bounds.h + padding * 2
+  )
+}
+
+function annotationEditNearMargin(imageBounds) {
+  return Math.min(
+    ANNOTATION_EDIT_NEAR_MARGIN_MAX,
+    Math.max(ANNOTATION_EDIT_NEAR_MARGIN_MIN, Math.max(imageBounds.w, imageBounds.h))
+  )
+}
+
+function shapeHasAnnotationColor(shape) {
+  const color = shape?.props?.color
+  const labelColor = shape?.props?.labelColor
+  return ANNOTATION_EDIT_COLORS.has(color) || ANNOTATION_EDIT_COLORS.has(labelColor)
+}
+
+function isAnnotationArrowShape(shape) {
+  return shape?.type === 'arrow' && (shape.meta?.cowartAnnotationArrow === true || shapeHasAnnotationColor(shape))
+}
+
+function isAnnotationTextShape(shape) {
+  return shape?.type === 'text' && (shape.meta?.cowartAnnotationText === true || shapeHasAnnotationColor(shape))
+}
+
+function uniqueShapeIds(shapeIds) {
+  return Array.from(new Set(shapeIds.filter(Boolean)))
+}
+
+function collectAnnotationEditShapeIds(editor, imageShapeId) {
+  const imageShape = editor.getShape(imageShapeId)
+  if (!isImageShape(imageShape)) {
+    throw new Error('请选择一张图片后再按标注修改。')
+  }
+
+  const imageBounds = editor.getShapePageBounds(imageShapeId)
+  if (!imageBounds) {
+    throw new Error('无法读取当前图片的画布位置。')
+  }
+
+  const nearBounds = expandBox(imageBounds, annotationEditNearMargin(imageBounds))
+  const relatedArrowIds = []
+  const relatedArrowBounds = []
+  const relatedTextIds = []
+
+  for (const shape of editor.getCurrentPageShapesSorted()) {
+    if (!shape || shape.id === imageShapeId) continue
+
+    const bounds = editor.getShapePageBounds(shape)
+    if (!bounds) continue
+
+    if (isAnnotationArrowShape(shape) && nearBounds.collides(bounds)) {
+      relatedArrowIds.push(shape.id)
+      relatedArrowBounds.push(bounds)
+      continue
+    }
+
+    if (!isAnnotationTextShape(shape)) continue
+
+    if (nearBounds.collides(bounds)) {
+      relatedTextIds.push(shape.id)
+      continue
+    }
+
+    if (
+      relatedArrowBounds.some((arrowBounds) =>
+        expandBox(arrowBounds, ANNOTATION_EDIT_RELATED_TEXT_MARGIN).collides(bounds)
+      )
+    ) {
+      relatedTextIds.push(shape.id)
+    }
+  }
+
+  return uniqueShapeIds([imageShapeId, ...relatedArrowIds, ...relatedTextIds])
+}
+
+function buildAnnotationEditPrompt({ imageShapeId, shapeIds, exportWidth, exportHeight, screenshotAsset }) {
+  const annotationCount = Math.max(0, shapeIds.length - 1)
+  const lines = [
+    ANNOTATION_EDIT_PROMPT,
+    '',
+    `Cowart source image shape: ${imageShapeId}`,
+    `Included annotation shapes: ${annotationCount}`,
+    `Screenshot size: ${Math.round(exportWidth)}x${Math.round(exportHeight)}`
+  ]
+
+  if (screenshotAsset?.assetPath) {
+    lines.push(
+      `Annotation screenshot local path: ${screenshotAsset.assetPath}`,
+      'Use this local screenshot file as the authoritative visual reference for the requested edits.'
+    )
+  }
+
+  return lines.join('\n')
+}
+
+function getAnnotationEditExportPixelRatio(bounds) {
+  const maxDimension = Math.max(bounds.w, bounds.h)
+  if (maxDimension > 1600) return 1
+  if (maxDimension > 1000) return 1.5
+  return 2
+}
+
+function annotationEditScreenshotFileName() {
+  const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  return `annotation-edit-${timestamp}.png`
+}
+
+function dataUrlToImageContent(dataUrl, meta = {}) {
+  const match = String(dataUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/)
+  if (!match) {
+    throw new Error('导出的截图不是有效的图片 data URL。')
+  }
+
+  return {
+    type: 'image',
+    data: match[2],
+    mimeType: match[1],
+    _meta: meta
+  }
+}
+
+function followUpSender() {
+  if (typeof window.cowartMcp?.sendFollowUpMessage === 'function') {
+    return (message) => window.cowartMcp.sendFollowUpMessage(message)
+  }
+  if (typeof window.openai?.sendFollowUpMessage === 'function') {
+    return (message) => window.openai.sendFollowUpMessage(message)
+  }
+  return null
+}
+
+function cowartHostCapabilities() {
+  try {
+    return (
+      window.cowartMcp?.getHostCapabilities?.() ||
+      window.openai?.hostCapabilities ||
+      globalThis.__COWART_MCP_APP__?.getHostCapabilities?.() ||
+      null
+    )
+  } catch (_error) {
+    return null
+  }
+}
+
+function supportsCowartMessageImages() {
+  return Boolean(cowartHostCapabilities()?.message?.image)
+}
+
+async function sendAnnotationEditRequest(editor, imageShapeId) {
+  const shapeIds = collectAnnotationEditShapeIds(editor, imageShapeId)
+  const rawBounds = editor.getShapesPageBounds(shapeIds)
+  if (!rawBounds) throw new Error('无法计算截图范围。')
+
+  const exportBounds = expandBox(rawBounds, ANNOTATION_EDIT_EXPORT_PADDING)
+  const exportResult = await editor.toImageDataUrl(shapeIds, {
+    bounds: exportBounds,
+    background: true,
+    darkMode: false,
+    format: 'png',
+    padding: 0,
+    pixelRatio: getAnnotationEditExportPixelRatio(exportBounds)
+  })
+  const screenshotAsset = await saveCowartReferenceImage({
+    anchorShapeId: imageShapeId,
+    fileName: annotationEditScreenshotFileName(),
+    dataUrl: exportResult.url,
+    mimeType: 'image/png'
+  })
+  const prompt = buildAnnotationEditPrompt({
+    imageShapeId,
+    shapeIds,
+    exportWidth: exportResult.width,
+    exportHeight: exportResult.height,
+    screenshotAsset
+  })
+  const sender = followUpSender()
+  if (!sender) {
+    throw new Error('当前 Cowart 画布没有可用的 Codex MCP 消息桥。')
+  }
+
+  const content = [{ type: 'text', text: prompt }]
+
+  if (supportsCowartMessageImages()) {
+    content.push(
+      dataUrlToImageContent(exportResult.url, {
+        cowartAnnotationEdit: true,
+        cowartSourceImageShapeId: imageShapeId,
+        cowartIncludedShapeIds: shapeIds,
+        cowartAnnotationScreenshotPath: screenshotAsset.assetPath || null,
+        cowartAnnotationScreenshotFileName: screenshotAsset.fileName || null
+      })
+    )
+  }
+
+  return sender({ prompt, content })
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function formatAiImageGenerationTarget(shape) {
+  const targetWidth = Math.round(Number(shape?.props?.w) || AI_IMAGE_HOLDER_DEFAULT_W)
+  const targetHeight = Math.round(Number(shape?.props?.h) || AI_IMAGE_HOLDER_DEFAULT_H)
+  const ratio = targetHeight ? targetWidth / targetHeight : 1
+  const preset = getAiImageAspectPreset(shape)
+  const ratioLabel = preset?.label ?? `${targetWidth}:${targetHeight}`
+
+  return {
+    targetWidth,
+    targetHeight,
+    ratio,
+    ratioLabel,
+    label: `${ratioLabel} · ${targetWidth}x${targetHeight}`
+  }
+}
+
+function getAiImageGenerationPanelLayout(editor, shapeId) {
+  const bounds = editor.getShapePageBounds(shapeId)
+  if (!bounds) return null
+
+  const containerBounds = editor.getContainer().getBoundingClientRect()
+  const viewportWidth = containerBounds.width || window.innerWidth || 0
+  const viewportHeight = containerBounds.height || window.innerHeight || 0
+  if (!viewportWidth || !viewportHeight) return null
+
+  const bottomLeft = editor.pageToViewport({ x: bounds.x, y: bounds.y + bounds.h })
+  const bottomRight = editor.pageToViewport({ x: bounds.x + bounds.w, y: bounds.y + bounds.h })
+  const screenWidth = Math.abs(bottomRight.x - bottomLeft.x)
+  const panelWidth = Math.min(
+    AI_IMAGE_GENERATION_PANEL_MAX_W,
+    Math.max(AI_IMAGE_GENERATION_PANEL_MIN_W, screenWidth * 2.6)
+  )
+  const panelLeft = clampNumber(
+    bottomLeft.x + screenWidth / 2 - panelWidth / 2,
+    AI_IMAGE_GENERATION_PANEL_VIEWPORT_MARGIN,
+    Math.max(AI_IMAGE_GENERATION_PANEL_VIEWPORT_MARGIN, viewportWidth - panelWidth - AI_IMAGE_GENERATION_PANEL_VIEWPORT_MARGIN)
+  )
+  const preferredTop = bottomLeft.y + AI_IMAGE_GENERATION_PANEL_OFFSET
+  const panelTop = clampNumber(
+    preferredTop,
+    AI_IMAGE_GENERATION_PANEL_VIEWPORT_MARGIN,
+    Math.max(AI_IMAGE_GENERATION_PANEL_VIEWPORT_MARGIN, viewportHeight - AI_IMAGE_GENERATION_PANEL_ESTIMATED_H - AI_IMAGE_GENERATION_PANEL_VIEWPORT_MARGIN)
+  )
+
+  return {
+    left: panelLeft,
+    top: panelTop,
+    width: panelWidth
+  }
+}
+
+function aiImageReferenceLines({ references, referenceAttached }) {
+  if (!references.length) return ['Reference images: none']
+
+  const lines = [`Reference images: ${references.length}`]
+  const localPathLines = []
+  references.forEach((reference, index) => {
+    const savedReference = reference.savedReference
+    const displayName = savedReference?.fileName || reference.file?.name || `selected reference image ${index + 1}`
+    if (savedReference?.assetPath) {
+      localPathLines.push(`${index + 1}. ${savedReference.assetPath}`)
+    } else {
+      localPathLines.push(`${index + 1}. ${displayName} (local path unavailable)`)
+    }
+  })
+
+  if (localPathLines.some((line) => !line.endsWith('(local path unavailable)'))) {
+    lines.push('Reference image local paths:', ...localPathLines, 'Use these local files as visual references.')
+  } else if (referenceAttached) {
+    lines.push('Reference images are attached as image content blocks; use them as visual references.')
+  } else {
+    lines.push('Reference image local paths were unavailable.')
+  }
+  return lines
+}
+
+function buildAiImageGenerationPrompt({ holderShape, userPrompt, references, referenceAttached }) {
+  const { targetWidth, targetHeight, ratio, ratioLabel } = formatAiImageGenerationTarget(holderShape)
+  const referenceLines = aiImageReferenceLines({ references, referenceAttached })
+
+  return [
+    AI_IMAGE_GENERATION_PROMPT_PREFIX,
+    '',
+    `Cowart AI image holder shape: ${holderShape.id}`,
+    `Target canvas slot: ${targetWidth} x ${targetHeight} canvas units.`,
+    `Target aspect ratio: ${ratioLabel} (${ratio.toFixed(3)} width/height).`,
+    'Compose the final bitmap for this slot without cropping or stretching.',
+    ...referenceLines,
+    '',
+    'Prompt:',
+    userPrompt.trim()
+  ].join('\n')
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => resolve(String(reader.result || '')))
+    reader.addEventListener('error', () => reject(reader.error || new Error('无法读取参考图。')))
+    reader.readAsDataURL(file)
+  })
+}
+
+function stopEditorOverlayEvent(event) {
+  event.stopPropagation()
+}
+
+async function sendAiImageGenerationRequest({ holderShape, userPrompt, referenceFiles = [] }) {
+  const sender = followUpSender()
+  if (!sender) {
+    throw new Error('当前 Cowart 画布没有可用的 Codex MCP 消息桥。')
+  }
+
+  const imageReferences = referenceFiles.slice(0, AI_IMAGE_REFERENCE_MAX_FILES)
+  const referenceAttached = Boolean(imageReferences.length && supportsCowartMessageImages())
+  const references = []
+
+  for (const [index, referenceFile] of imageReferences.entries()) {
+    const referenceDataUrl = await readFileAsDataUrl(referenceFile)
+    let savedReference = null
+    if (hasCowartWidgetBridge()) {
+      try {
+        savedReference = await saveCowartReferenceImage({
+          holderShapeId: holderShape.id,
+          fileName: referenceFile.name || `reference-${index + 1}.png`,
+          dataUrl: referenceDataUrl,
+          mimeType: referenceFile.type || undefined
+        })
+      } catch (error) {
+        if (!referenceAttached) {
+          throw new Error(`参考图无法保存到 Cowart 本地 assets：${error instanceof Error ? error.message : String(error)}`)
+        }
+        console.warn('Cowart reference image could not be saved; relying on direct image attachment.', error)
+      }
+    } else if (!referenceAttached) {
+      throw new Error('当前 Codex host 没有声明支持图片附件，也没有可用的 Cowart MCP 文件保存桥。')
+    }
+    references.push({ file: referenceFile, dataUrl: referenceDataUrl, savedReference })
+  }
+
+  const prompt = buildAiImageGenerationPrompt({
+    holderShape,
+    userPrompt,
+    references,
+    referenceAttached
+  })
+  const content = [{ type: 'text', text: prompt }]
+
+  if (referenceAttached) {
+    for (const [index, reference] of references.entries()) {
+      content.push(dataUrlToImageContent(reference.dataUrl, {
+        cowartAiImageReference: true,
+        cowartAiImageReferenceIndex: index + 1,
+        cowartAiImageHolderShapeId: holderShape.id,
+        cowartReferenceFileName: reference.file.name || null,
+        cowartReferenceAssetPath: reference.savedReference?.assetPath || null
+      }))
+    }
+  }
+
+  return sender({ prompt, content })
+}
+
 class CowartAnnotationTool extends StateNode {
   static id = ANNOTATION_TOOL_ID
   static initial = 'idle'
@@ -554,7 +1036,7 @@ const cowartUiOverrides = {
       [AI_IMAGE_TOOL_ID]: {
         id: AI_IMAGE_TOOL_ID,
         label: 'tool.ai-image',
-        icon: 'tool-frame',
+        icon: aiFrameToolIcon,
         kbd: 'a',
         onSelect() {
           createAiImageHolderAtViewportCenter(editor)
@@ -595,7 +1077,237 @@ const cowartUiOverrides = {
 
 const cowartComponents = {
   Toolbar: CowartToolbar,
+  ImageToolbar: CowartImageToolbar,
+  InFrontOfTheCanvas: CowartCanvasOverlay,
   StylePanel: CowartStylePanel
+}
+
+function CowartCanvasOverlay() {
+  return <CowartAiImageGenerationPanel />
+}
+
+function CowartAiImageGenerationPanel() {
+  const editor = useEditor()
+  const selectedTarget = useValue(
+    'selected ai image holder generation panel target',
+    () => {
+      const shape = editor.getOnlySelectedShape()
+      if (!isAiImageHolderShape(shape)) return null
+
+      editor.getCamera()
+      editor.getViewportScreenBounds()
+
+      const layout = getAiImageGenerationPanelLayout(editor, shape.id)
+      if (!layout) return null
+
+      return {
+        shape,
+        layout
+      }
+    },
+    [editor]
+  )
+  const fileInputRef = useRef(null)
+  const [promptValue, setPromptValue] = useState('')
+  const [referenceFiles, setReferenceFiles] = useState([])
+  const [referencePreviews, setReferencePreviews] = useState([])
+  const [status, setStatus] = useState('idle')
+  const [errorMessage, setErrorMessage] = useState('')
+
+  useEffect(() => {
+    setStatus('idle')
+    setErrorMessage('')
+  }, [selectedTarget?.shape.id])
+
+  useEffect(() => {
+    if (status !== 'sent') return undefined
+    const timer = window.setTimeout(() => setStatus('idle'), AI_IMAGE_GENERATION_STATUS_RESET_MS)
+    return () => window.clearTimeout(timer)
+  }, [status])
+
+  useEffect(() => {
+    const previews = referenceFiles.map((file, index) => ({
+      file,
+      key: `${file.name}-${file.size}-${file.lastModified}-${index}`,
+      url: URL.createObjectURL(file)
+    }))
+    setReferencePreviews(previews)
+    return () => {
+      previews.forEach((preview) => URL.revokeObjectURL(preview.url))
+    }
+  }, [referenceFiles])
+
+  if (!selectedTarget) return null
+
+  const { shape, layout } = selectedTarget
+  const canSend = promptValue.trim().length > 0 || referenceFiles.length > 0
+  const isSending = status === 'sending'
+
+  function handleReferenceChange(event) {
+    const selectedFiles = Array.from(event.target.files || [])
+    if (!selectedFiles.length) return
+
+    const imageFiles = selectedFiles.filter((file) => file.type.startsWith('image/'))
+    if (imageFiles.length !== selectedFiles.length) {
+      setStatus('error')
+      setErrorMessage('请选择图片文件。')
+      event.target.value = ''
+      return
+    }
+
+    const availableSlots = Math.max(0, AI_IMAGE_REFERENCE_MAX_FILES - referenceFiles.length)
+    if (!availableSlots) {
+      setStatus('error')
+      setErrorMessage(`最多支持 ${AI_IMAGE_REFERENCE_MAX_FILES} 张参考图。`)
+      event.target.value = ''
+      return
+    }
+
+    const filesToAdd = imageFiles.slice(0, availableSlots)
+    setReferenceFiles((currentFiles) => [...currentFiles, ...filesToAdd].slice(0, AI_IMAGE_REFERENCE_MAX_FILES))
+    if (imageFiles.length > availableSlots) {
+      setStatus('error')
+      setErrorMessage(`最多支持 ${AI_IMAGE_REFERENCE_MAX_FILES} 张参考图。`)
+    } else {
+      setStatus('idle')
+      setErrorMessage('')
+    }
+    event.target.value = ''
+  }
+
+  function clearReferences() {
+    setReferenceFiles([])
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  function removeReferenceAt(indexToRemove) {
+    setReferenceFiles((currentFiles) => currentFiles.filter((_file, index) => index !== indexToRemove))
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+    if (status === 'error') {
+      setStatus('idle')
+      setErrorMessage('')
+    }
+  }
+
+  async function handleSubmit(event) {
+    event?.preventDefault()
+    if (!canSend || isSending) return
+
+    setStatus('sending')
+    setErrorMessage('')
+    try {
+      await sendAiImageGenerationRequest({
+        holderShape: shape,
+        userPrompt: promptValue,
+        referenceFiles
+      })
+      setPromptValue('')
+      clearReferences()
+      setStatus('sent')
+    } catch (error) {
+      console.error(error)
+      setStatus('error')
+      setErrorMessage(error instanceof Error ? error.message : '发送失败，请重试。')
+    }
+  }
+
+  function handlePromptKeyDown(event) {
+    stopEditorOverlayEvent(event)
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      handleSubmit(event)
+    }
+  }
+
+  return (
+    <div className="cowart-ai-generation-overlay" aria-hidden={false}>
+      <form
+        aria-label="AI 图片生成"
+        className="cowart-ai-generation-panel"
+        data-status={status}
+        onClick={stopEditorOverlayEvent}
+        onDoubleClick={stopEditorOverlayEvent}
+        onKeyDown={stopEditorOverlayEvent}
+        onPointerDown={stopEditorOverlayEvent}
+        onSubmit={handleSubmit}
+        style={{
+          left: `${layout.left}px`,
+          top: `${layout.top}px`,
+          width: `${layout.width}px`
+        }}
+      >
+        <div className="cowart-ai-generation-reference-row">
+          <div className="cowart-ai-generation-reference-strip">
+            {referencePreviews.map((preview, index) => (
+              <div className="cowart-ai-generation-reference-preview" key={preview.key}>
+                <img alt={`参考图 ${index + 1}`} src={preview.url} />
+                <button aria-label={`移除参考图 ${index + 1}`} onClick={() => removeReferenceAt(index)} type="button">
+                  <TldrawUiButtonIcon icon="cross-2" small />
+                </button>
+              </div>
+            ))}
+            {referenceFiles.length < AI_IMAGE_REFERENCE_MAX_FILES && (
+              <button
+                aria-label="选择参考图"
+                className="cowart-ai-generation-reference-button"
+                onClick={() => fileInputRef.current?.click()}
+                type="button"
+              >
+                <TldrawUiButtonIcon icon="tool-media" small />
+                <span>参考图</span>
+              </button>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            accept="image/*"
+            className="cowart-ai-generation-file-input"
+            multiple
+            onChange={handleReferenceChange}
+            type="file"
+          />
+        </div>
+
+        <textarea
+          aria-label="自定义 prompt"
+          className="cowart-ai-generation-prompt"
+          disabled={isSending}
+          onChange={(event) => {
+            setPromptValue(event.target.value)
+            if (status === 'error') {
+              setStatus('idle')
+              setErrorMessage('')
+            }
+          }}
+          onKeyDown={handlePromptKeyDown}
+          placeholder="描述你想生成的图片"
+          rows={3}
+          value={promptValue}
+        />
+
+        <div className="cowart-ai-generation-footer">
+          <div className="cowart-ai-generation-status" aria-live="polite">
+            {status === 'sending'
+              ? '正在发送'
+              : status === 'sent'
+                ? '已发送'
+                : errorMessage}
+          </div>
+          <button
+            aria-label="发送生成请求"
+            className="cowart-ai-generation-send"
+            disabled={!canSend || isSending}
+            type="submit"
+          >
+            <span>{isSending ? '发送中' : '发送'}</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  )
 }
 
 function CowartStylePanel(props) {
@@ -809,6 +1521,199 @@ function CowartAspectLockIcon({ locked }) {
   )
 }
 
+function CowartImageToolbar() {
+  return (
+    <DefaultImageToolbar>
+      <CowartImageToolbarContent />
+    </DefaultImageToolbar>
+  )
+}
+
+function CowartImageToolbarContent() {
+  const editor = useEditor()
+  const imageShapeId = useValue(
+    'cowart selected image shape id',
+    () => {
+      const shape = editor.getOnlySelectedShape()
+      return isImageShape(shape) ? shape.id : null
+    },
+    [editor]
+  )
+  const isInCropTool = useValue('cowart image crop tool state', () => editor.isIn('select.crop.'), [
+    editor
+  ])
+  const [isEditingAltText, setIsEditingAltText] = useState(false)
+
+  const handleManipulatingEnd = useCallback(() => {
+    editor.setCroppingShape(null)
+    editor.setCurrentTool('select.idle')
+  }, [editor])
+  const handleManipulatingStart = useCallback(() => editor.setCurrentTool('select.crop.idle'), [editor])
+  const handleEditAltTextStart = useCallback(() => setIsEditingAltText(true), [])
+  const handleEditAltTextClose = useCallback(() => setIsEditingAltText(false), [])
+
+  useEffect(() => {
+    setIsEditingAltText(false)
+  }, [imageShapeId])
+
+  if (!imageShapeId) return null
+
+  if (isEditingAltText) {
+    return (
+      <CowartAltTextEditor
+        onClose={handleEditAltTextClose}
+        shapeId={imageShapeId}
+      />
+    )
+  }
+
+  return (
+    <>
+      <DefaultImageToolbarContent
+        imageShapeId={imageShapeId}
+        isManipulating={isInCropTool}
+        onEditAltTextStart={handleEditAltTextStart}
+        onManipulatingEnd={handleManipulatingEnd}
+        onManipulatingStart={handleManipulatingStart}
+      />
+      {!isInCropTool && <CowartAnnotationEditToolbarButton imageShapeId={imageShapeId} />}
+    </>
+  )
+}
+
+function CowartAltTextEditor({ shapeId, onClose }) {
+  const editor = useEditor()
+  const msg = useTranslation()
+  const trackEvent = useUiEvents()
+  const inputRef = useRef(null)
+  const isReadonly = editor.getIsReadonly()
+  const [altText, setAltText] = useState(() => {
+    const shape = editor.getShape(shapeId)
+    return typeof shape?.props?.altText === 'string' ? shape.props.altText : ''
+  })
+
+  const handleComplete = useCallback(() => {
+    trackEvent('set-alt-text', { source: 'image-toolbar' })
+    const shape = editor.getShape(shapeId)
+    if (shape && 'altText' in shape.props) {
+      editor.updateShapes([
+        {
+          id: shape.id,
+          type: shape.type,
+          props: { altText }
+        }
+      ])
+    }
+    onClose()
+  }, [altText, editor, onClose, shapeId, trackEvent])
+
+  useEffect(() => {
+    inputRef.current?.select()
+
+    function handleKeyDown(event) {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      onClose()
+    }
+
+    const doc = editor.getContainerDocument()
+    doc.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => doc.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [editor, inputRef, onClose])
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      const toolbar = editor.getContainerDocument().querySelector('.tlui-media__toolbar')
+      if (toolbar?.contains(event.target)) return
+      handleComplete()
+    }
+
+    const doc = editor.getContainerDocument()
+    doc.addEventListener('pointerdown', handlePointerDown, { capture: true })
+    return () => doc.removeEventListener('pointerdown', handlePointerDown, { capture: true })
+  }, [editor, handleComplete])
+
+  return (
+    <>
+      <TldrawUiInput
+        ref={inputRef}
+        aria-label={msg('tool.media-alt-text-desc')}
+        className="tlui-media__toolbar-alt-text-input"
+        data-testid="media-toolbar.alt-text-input"
+        disabled={isReadonly}
+        onCancel={onClose}
+        onComplete={handleComplete}
+        onValueChange={setAltText}
+        placeholder={msg('tool.media-alt-text-desc')}
+        value={altText}
+      />
+      {!isReadonly && (
+        <TldrawUiButton
+          data-testid="tool.media-alt-text-confirm"
+          onClick={handleComplete}
+          onPointerDown={(event) => event.preventDefault()}
+          title={msg('tool.media-alt-text-confirm')}
+          type="icon"
+        >
+          <TldrawUiButtonIcon icon="check" small />
+        </TldrawUiButton>
+      )}
+    </>
+  )
+}
+
+function CowartAnnotationEditToolbarButton({ imageShapeId }) {
+  const editor = useEditor()
+  const [status, setStatus] = useState('idle')
+
+  useEffect(() => {
+    if (status === 'idle' || status === 'sending') return
+    const timer = window.setTimeout(() => setStatus('idle'), ANNOTATION_EDIT_STATUS_RESET_MS)
+    return () => window.clearTimeout(timer)
+  }, [status])
+
+  async function handleClick() {
+    if (status === 'sending') return
+
+    setStatus('sending')
+    try {
+      await sendAnnotationEditRequest(editor, imageShapeId)
+      setStatus('sent')
+    } catch (error) {
+      console.error(error)
+      setStatus('error')
+    }
+  }
+
+  const title =
+    status === 'sending'
+      ? '正在提交标注修改'
+      : status === 'sent'
+        ? '已提交标注修改'
+        : status === 'error'
+          ? '提交失败，请重试'
+          : ANNOTATION_EDIT_TOOL_LABEL
+
+  return (
+    <TldrawUiToolbarButton
+      aria-label={title}
+      className="cowart-annotation-edit-toolbar-button"
+      data-status={status}
+      data-testid="tool.cowart-annotation-edit"
+      disabled={status === 'sending'}
+      onClick={handleClick}
+      title={title}
+      type="icon"
+    >
+      <TldrawUiButtonIcon
+        icon={status === 'sent' ? 'check' : status === 'error' ? 'warning-triangle' : 'tool-highlight'}
+        small
+      />
+      <span className="cowart-annotation-edit-toolbar-label">{ANNOTATION_EDIT_TOOL_LABEL}</span>
+    </TldrawUiToolbarButton>
+  )
+}
+
 function CowartToolbarItem({ toolId }) {
   const editor = useEditor()
   const isSelected = useValue(
@@ -995,24 +1900,11 @@ export default function App() {
 
     async function loadCanvas() {
       try {
-        const [canvasResponse, viewStateResponse] = await Promise.all([
-          fetch(CANVAS_ENDPOINT, { signal: controller.signal }),
-          fetch(VIEW_STATE_ENDPOINT, { signal: controller.signal })
-        ])
-        if (!canvasResponse.ok) {
-          throw new Error(`Failed to load canvas: ${canvasResponse.status} - ${canvasResponse.statusText}`)
-        }
-        if (!viewStateResponse.ok) {
-          throw new Error(`Failed to load canvas view state: ${viewStateResponse.status} - ${viewStateResponse.statusText}`)
-        }
-        const [canvasData, viewStateData] = await Promise.all([
-          canvasResponse.json(),
-          viewStateResponse.json()
-        ])
-        const sanitized = sanitizeCanvasSnapshotForTldraw(canvasData.snapshot)
+        const canvasState = await loadCowartCanvasState(controller.signal)
+        const sanitized = sanitizeCanvasSnapshotForTldraw(canvasState.snapshot)
         setSnapshot(sanitized.snapshot)
         setSkippedRecords(sanitized.skippedRecords)
-        setViewState(viewStateData.viewState ?? null)
+        setViewState(canvasState.viewState ?? null)
       } catch (error) {
         if (error.name === 'AbortError') return
         setLoadError(error)
@@ -1056,17 +1948,10 @@ export default function App() {
 
       isSelectionStateSaving = true
       try {
-        const response = await fetch(SELECTION_ENDPOINT, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            ...selectionSnapshot,
-            updatedAt: new Date().toISOString()
-          })
+        await saveCowartSelectionState({
+          ...selectionSnapshot,
+          updatedAt: new Date().toISOString()
         })
-        if (!response.ok) {
-          throw new Error(`Failed to save selection: ${response.status}`)
-        }
       } catch (error) {
         console.error(error)
       } finally {
@@ -1098,14 +1983,7 @@ export default function App() {
 
       isViewStateSaving = true
       try {
-        const response = await fetch(VIEW_STATE_ENDPOINT, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: nextViewState
-        })
-        if (!response.ok) {
-          throw new Error(`Failed to save view state: ${response.status}`)
-        }
+        await saveCowartViewState(viewStateSnapshot)
       } catch (error) {
         console.error(error)
       } finally {
@@ -1126,6 +2004,7 @@ export default function App() {
     let hasUnsavedChanges = false
     let isSyncingAnnotationShape = false
     let remoteLoadController = null
+    const acknowledgedImageShapeDeletes = new Set()
 
     async function saveCanvas() {
       if (!hasUnsavedChanges) return
@@ -1137,15 +2016,14 @@ export default function App() {
 
       isSaving = true
       try {
-        const body = JSON.stringify(editor.store.getStoreSnapshot())
-        const response = await fetch(CANVAS_ENDPOINT, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body
+        const saveResult = await saveCowartCanvasSnapshot(editor.store.getStoreSnapshot(), {
+          protectImageRecords: true,
+          acknowledgedImageShapeDeletes: Array.from(acknowledgedImageShapeDeletes)
         })
-        if (!response.ok) {
-          throw new Error(`Failed to save canvas: ${response.status}`)
+        if (saveResult?.ok === false) {
+          throw new Error(saveResult.message || 'Cowart refused to save the canvas snapshot.')
         }
+        acknowledgedImageShapeDeletes.clear()
         hasUnsavedChanges = false
       } catch (error) {
         console.error(error)
@@ -1173,17 +2051,12 @@ export default function App() {
       const preFetchStore = preserveLocalChanges ? null : editor.store.getStoreSnapshot().store
 
       try {
-        const response = await fetch(CANVAS_ENDPOINT, { signal: controller.signal })
-        if (!response.ok) {
-          throw new Error(`Failed to refresh canvas: ${response.status}`)
-        }
-
-        const canvasData = await response.json()
+        const nextSnapshot = await refreshCowartCanvasSnapshot(controller.signal)
         const effectivePreserve =
           preserveLocalChanges || (preFetchStore && storeChangedSinceSnapshot(editor, preFetchStore))
         const { changedRecords, skippedRecords: nextSkippedRecords } = applyRemoteCanvasSnapshot(
           editor,
-          canvasData.snapshot,
+          nextSnapshot,
           {
             preserveLocalChanges: effectivePreserve
           }
@@ -1208,14 +2081,25 @@ export default function App() {
       }
     }
 
-    const unsubscribe = editor.store.listen(scheduleSave, {
-      source: 'user',
-      scope: 'document'
-    })
+    const unsubscribe = editor.store.listen(
+      ({ changes }) => {
+        for (const imageShapeId of collectRemovedImageShapeIds(changes)) {
+          acknowledgedImageShapeDeletes.add(imageShapeId)
+        }
+        scheduleSave()
+      },
+      {
+        source: 'user',
+        scope: 'document'
+      }
+    )
 
     let canvasEvents = null
-    if ('EventSource' in window) {
-      canvasEvents = new EventSource(CANVAS_EVENTS_ENDPOINT)
+    let canvasRefreshTimer = null
+    if (hasCowartWidgetBridge()) {
+      canvasRefreshTimer = window.setInterval(loadRemoteCanvasSnapshot, 1600)
+    } else if (!IS_COWART_WIDGET_BUILD && 'EventSource' in window) {
+      canvasEvents = new window.EventSource('/api/canvas-events')
       canvasEvents.addEventListener('canvas-changed', loadRemoteCanvasSnapshot)
       canvasEvents.onerror = (error) => {
         console.warn('Cowart canvas live refresh disconnected.', error)
@@ -1290,6 +2174,7 @@ export default function App() {
       window.clearTimeout(saveTimer)
       window.clearInterval(selectionStateTimer)
       window.clearInterval(viewStateTimer)
+      window.clearInterval(canvasRefreshTimer)
       remoteLoadController?.abort()
       canvasEvents?.close()
       if (window.__cowartEditor === editor) {
@@ -1327,6 +2212,7 @@ export default function App() {
       <SkippedRecordsNotice records={skippedRecords} />
       <Tldraw
         snapshot={snapshot ?? undefined}
+        assetUrls={cowartAssetUrls}
         inferDarkMode
         onMount={handleMount}
         overrides={cowartUiOverrides}
@@ -1339,13 +2225,40 @@ export default function App() {
 }
 
 function SkippedRecordsNotice({ records }) {
-  if (!records.length) return null
+  const [isVisible, setIsVisible] = useState(false)
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false)
+  const recordsKey = records
+    .map((record) => `${record.id}:${record.typeName ?? ''}:${record.type ?? ''}:${record.reason}`)
+    .join('\n')
+
+  useEffect(() => {
+    if (!records.length) {
+      setIsVisible(false)
+      setIsDetailsOpen(false)
+      return
+    }
+
+    setIsVisible(true)
+    setIsDetailsOpen(false)
+  }, [records.length, recordsKey])
+
+  useEffect(() => {
+    if (!records.length || !isVisible || isDetailsOpen) return undefined
+
+    const noticeTimer = window.setTimeout(() => {
+      setIsVisible(false)
+    }, SKIPPED_RECORDS_NOTICE_AUTO_HIDE_MS)
+
+    return () => window.clearTimeout(noticeTimer)
+  }, [records.length, recordsKey, isVisible, isDetailsOpen])
+
+  if (!records.length || !isVisible) return null
 
   return (
     <aside className="cowart-skipped-records" aria-live="polite">
       <strong>Skipped {records.length} invalid canvas record{records.length === 1 ? '' : 's'}.</strong>
       <span>Valid content was loaded.</span>
-      <details>
+      <details open={isDetailsOpen} onToggle={(event) => setIsDetailsOpen(event.currentTarget.open)}>
         <summary>Details</summary>
         <ul>
           {records.slice(0, 8).map((record, index) => (

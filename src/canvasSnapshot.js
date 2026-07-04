@@ -55,6 +55,24 @@ function pruneRecordsWithMissingDependencies(store, skippedRecords) {
   return prunedStore
 }
 
+function normalizeImageShapeRecord(record) {
+  if (record?.typeName !== 'shape' || record.type !== 'image' || !record.props) {
+    return record
+  }
+
+  const props = { ...record.props }
+  props.url ??= ''
+  props.crop ??= null
+  props.flipX ??= false
+  props.flipY ??= false
+  props.altText ??= ''
+
+  return {
+    ...record,
+    props
+  }
+}
+
 export function sanitizeCanvasSnapshotForTldraw(snapshot) {
   if (!isCanvasSnapshot(snapshot)) {
     return { snapshot: null, skippedRecords: [] }
@@ -82,11 +100,12 @@ export function sanitizeCanvasSnapshotForTldraw(snapshot) {
 
   const validStore = {}
   for (const record of Object.values(migratedSnapshot.store)) {
+    const normalizedRecord = normalizeImageShapeRecord(record)
     try {
-      validationStore.put([record], 'initialize')
-      validStore[record.id] = validationStore.get(record.id)
+      validationStore.put([normalizedRecord], 'initialize')
+      validStore[normalizedRecord.id] = validationStore.get(normalizedRecord.id)
     } catch (error) {
-      skippedRecords.push(describeSkippedRecord(record, error))
+      skippedRecords.push(describeSkippedRecord(normalizedRecord, error))
     }
   }
 

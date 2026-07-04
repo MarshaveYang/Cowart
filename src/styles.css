@@ -150,6 +150,58 @@ body {
   height: 100%;
 }
 
+.cowart-ai-frame-tool-icon {
+  display: grid;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: currentColor;
+}
+
+.cowart-ai-frame-tool-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cowart-annotation-edit-toolbar-button[data-status="sending"] {
+  opacity: 0.65;
+}
+
+.cowart-annotation-edit-toolbar-button {
+  width: auto;
+  min-width: 104px;
+  padding: 0 12px;
+  gap: 6px;
+}
+
+.cowart-annotation-edit-toolbar-button::after {
+  inset: 4px;
+}
+
+.cowart-annotation-edit-toolbar-label {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  color: currentColor;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.cowart-annotation-edit-toolbar-button[data-status="sent"] {
+  color: #1f8f4d;
+}
+
+.cowart-annotation-edit-toolbar-button[data-status="error"] {
+  color: #c2410c;
+}
+
 .tlui-style-panel.tlui-style-panel__wrapper:has(.cowart-ai-image-style-panel) {
   width: min(240px, calc(100vw - 24px)) !important;
   max-width: min(240px, calc(100vw - 24px)) !important;
@@ -293,4 +345,224 @@ body {
   display: block;
   border: 2px solid var(--tl-color-text);
   border-radius: 4px;
+}
+
+.cowart-ai-generation-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.cowart-ai-generation-panel {
+  position: absolute;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  box-sizing: border-box;
+  min-width: min(520px, calc(100vw - 32px));
+  max-width: min(640px, calc(100vw - 32px));
+  height: 226px;
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+  padding: 16px;
+  gap: 10px;
+  color: #1f2430;
+  background: rgb(255 255 255 / 96%);
+  border: 1px solid #d5dbe5;
+  border-radius: 18px;
+  box-shadow:
+    0 30px 74px rgb(15 23 42 / 10%),
+    0 10px 30px rgb(15 23 42 / 8%),
+    inset 0 1px 0 rgb(255 255 255 / 85%);
+  pointer-events: auto;
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.cowart-ai-generation-panel[data-status="error"] {
+  border-color: #f06449;
+  box-shadow:
+    0 30px 74px rgb(15 23 42 / 10%),
+    0 0 0 2px rgb(240 100 73 / 14%);
+}
+
+.cowart-ai-generation-reference-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+}
+
+.cowart-ai-generation-reference-button,
+.cowart-ai-generation-send,
+.cowart-ai-generation-reference-preview button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+}
+
+.cowart-ai-generation-reference-strip {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 0 2px 2px;
+  scrollbar-width: none;
+}
+
+.cowart-ai-generation-reference-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.cowart-ai-generation-reference-button {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  flex-direction: column;
+  padding: 0;
+  gap: 4px;
+  color: #a5abb4;
+  font-size: 11px;
+  line-height: 1;
+  background: #f4f5f7;
+  border-radius: 12px;
+}
+
+.cowart-ai-generation-reference-button svg,
+.cowart-ai-generation-reference-button .tlui-icon,
+.cowart-ai-generation-reference-button .tlui-button__icon {
+  width: 18px;
+  height: 18px;
+}
+
+.cowart-ai-generation-reference-button:hover {
+  color: #6f7784;
+  background: #edeff2;
+}
+
+.cowart-ai-generation-file-input {
+  display: none;
+}
+
+.cowart-ai-generation-reference-preview {
+  position: relative;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  overflow: visible;
+  border-radius: 12px;
+}
+
+.cowart-ai-generation-reference-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  background: #f4f5f7;
+}
+
+.cowart-ai-generation-reference-preview button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: #25282d;
+  background: #fff;
+  border-radius: 999px;
+  box-shadow:
+    0 4px 12px rgb(15 23 42 / 12%),
+    0 0 0 1px rgb(15 23 42 / 7%);
+}
+
+.cowart-ai-generation-reference-preview button svg,
+.cowart-ai-generation-reference-preview button .tlui-icon,
+.cowart-ai-generation-reference-preview button .tlui-button__icon {
+  width: 10px;
+  height: 10px;
+}
+
+.cowart-ai-generation-reference-preview button:hover {
+  background: #f6f7f9;
+}
+
+.cowart-ai-generation-prompt {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  padding: 0 2px;
+  resize: none;
+  overflow-y: auto;
+  color: #1f2430;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.cowart-ai-generation-prompt::placeholder {
+  color: #b3b8c1;
+}
+
+.cowart-ai-generation-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 38px;
+  gap: 10px;
+  align-items: center;
+}
+
+.cowart-ai-generation-status {
+  min-width: 0;
+  overflow: hidden;
+  color: #647080;
+  font-size: 13px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cowart-ai-generation-panel[data-status="error"] .cowart-ai-generation-status {
+  color: #c2410c;
+}
+
+.cowart-ai-generation-panel[data-status="sent"] .cowart-ai-generation-status {
+  color: #1f8f4d;
+}
+
+.cowart-ai-generation-send {
+  min-width: 72px;
+  height: 38px;
+  padding: 0 16px;
+  color: #fff;
+  background: #2f80ed;
+  border-radius: 14px;
+}
+
+.cowart-ai-generation-send:hover:not(:disabled) {
+  background: #226fda;
+}
+
+.cowart-ai-generation-send:disabled {
+  color: #aeb4bd;
+  background: #f0f1f4;
+  box-shadow: none;
+  cursor: default;
+}
+
+@media (max-width: 640px) {
+  .cowart-ai-generation-panel {
+    min-width: min(320px, calc(100vw - 32px));
+    height: 214px;
+    padding: 14px;
+    border-radius: 18px;
+  }
 }
