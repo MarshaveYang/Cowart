@@ -125,7 +125,7 @@ const ANNOTATION_EDIT_COLORS = new Set(['red', 'yellow', 'orange'])
 const AI_IMAGE_GENERATION_PROMPT_PREFIX = [
   '[@cowart](plugin://cowart@personal) 生成图片',
   '',
-  '请根据下面的 prompt 生成一张图片，并填入当前选中的 Cowart AI 图片框。',
+  '请根据下面的 prompt 生成一张图片，并替换当前选中的 Cowart AI 图片框；最终画布里应留下普通图片形状，不保留 AI 图片框容器。',
   '如果附带一张或多张参考图，请把参考图作为视觉参考；不要把参考图文件名或任何界面元素画进最终图片。',
   '不需要选择生图模型，使用 Codex 当前可用的图片生成能力。'
 ].join('\n')
@@ -161,6 +161,12 @@ function recordsAreEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
+const REMOTE_REMOVABLE_RECORD_TYPES = new Set(['asset', 'binding', 'shape'])
+
+function isRemoteRemovableRecord(record) {
+  return REMOTE_REMOVABLE_RECORD_TYPES.has(record?.typeName)
+}
+
 function storeChangedSinceSnapshot(editor, baselineStore) {
   const currentStore = editor.store.getStoreSnapshot().store
   const baselineIds = new Set(Object.keys(baselineStore))
@@ -185,18 +191,28 @@ function applyRemoteCanvasSnapshot(editor, snapshot, { preserveLocalChanges = fa
   if (!sanitized.snapshot) return { changedRecords: 0, skippedRecords: sanitized.skippedRecords }
 
   const recordsToPut = Object.values(sanitized.snapshot.store).filter((record) => {
+    if (preserveLocalChanges) return false
     const localRecord = editor.store.get(record.id)
     if (!localRecord) return true
-    if (preserveLocalChanges) return false
     return !recordsAreEqual(localRecord, record)
   })
+  const remoteRecordIds = new Set(Object.keys(sanitized.snapshot.store))
+  const recordsToRemove = preserveLocalChanges
+    ? []
+    : Object.values(editor.store.getStoreSnapshot().store)
+        .filter((record) => isRemoteRemovableRecord(record) && !remoteRecordIds.has(record.id))
+        .map((record) => record.id)
 
-  if (recordsToPut.length === 0) {
+  if (recordsToPut.length === 0 && recordsToRemove.length === 0) {
     return { changedRecords: 0, skippedRecords: sanitized.skippedRecords }
   }
 
   let changedRecords = 0
   editor.store.mergeRemoteChanges(() => {
+    if (recordsToRemove.length > 0) {
+      editor.store.remove(recordsToRemove)
+      changedRecords += recordsToRemove.length
+    }
     for (const record of recordsToPut) {
       try {
         editor.store.put([record])
@@ -1991,10 +2007,13 @@ export default function App() {
 
       isSaving = true
       try {
-        await saveCowartCanvasSnapshot(editor.store.getStoreSnapshot(), {
+        const saveResult = await saveCowartCanvasSnapshot(editor.store.getStoreSnapshot(), {
           protectImageRecords: true,
           acknowledgedImageShapeDeletes: Array.from(acknowledgedImageShapeDeletes)
         })
+        if (saveResult?.ok === false) {
+          throw new Error(saveResult.message || 'Cowart refused to save the canvas snapshot.')
+        }
         acknowledgedImageShapeDeletes.clear()
         hasUnsavedChanges = false
       } catch (error) {

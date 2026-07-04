@@ -62,7 +62,7 @@ const server = new McpServer(
   },
   {
     instructions:
-      "Render and update the native Cowart Codex widget. Use render_cowart_canvas_widget to open the canvas for the active project, get_cowart_selection for persisted widget selection, save_cowart_reference_image for widget-provided reference images, and insert_cowart_image to place bitmap assets into the project-backed canvas without hand-writing tldraw records.",
+      "Render and update the native Cowart Codex widget. Use render_cowart_canvas_widget to open the canvas for the active project, get_cowart_selection for persisted widget selection, save_cowart_reference_image for widget-provided reference images, and insert_cowart_image to place or replace bitmap assets in the project-backed canvas without hand-writing tldraw records.",
   },
 );
 
@@ -248,6 +248,29 @@ function isAiImageHolderShape(shape) {
   return shape?.typeName === "shape" && shape.meta?.cowartAiImageHolder === true;
 }
 
+function collectDescendantShapeIds(store, shapeId) {
+  if (!shapeId) return [];
+  const byParent = new Map();
+  for (const record of Object.values(store)) {
+    if (record?.typeName !== "shape") continue;
+    const children = byParent.get(record.parentId) ?? [];
+    children.push(record.id);
+    byParent.set(record.parentId, children);
+  }
+
+  const descendants = [];
+  const queue = [...(byParent.get(shapeId) ?? [])];
+  const visited = new Set([shapeId]);
+  while (queue.length > 0) {
+    const childId = queue.shift();
+    if (!childId || visited.has(childId)) continue;
+    visited.add(childId);
+    descendants.push(childId);
+    queue.push(...(byParent.get(childId) ?? []));
+  }
+  return descendants;
+}
+
 function choosePlacement({ store, pageId, parentId, anchorShape, width, height, margin, placement }) {
   const anchorBounds = anchorShape ? pageBoundsForShape(store, anchorShape) : null;
   let x = anchorBounds ? anchorBounds.x + anchorBounds.w + margin : 0;
@@ -336,12 +359,14 @@ async function insertCowartImage(args = {}) {
 
   const imageSize = await getImageDimensions(sourceImagePath);
   const anchorBounds = anchorShape ? pageBoundsForShape(store, anchorShape) : null;
-  const shouldFillAiImageHolder = args.matchAnchor !== false && isAiImageHolderShape(anchorShape) && anchorBounds;
+  const shouldTargetAiImageHolder = args.matchAnchor !== false && isAiImageHolderShape(anchorShape) && anchorBounds;
+  const shouldReplaceAiImageHolder = shouldTargetAiImageHolder && args.replaceAiImageHolder !== false;
+  const shouldFillAiImageHolder = shouldTargetAiImageHolder && !shouldReplaceAiImageHolder;
   const matchAnchor = args.matchAnchor !== false && anchorBounds;
-  const width = shouldFillAiImageHolder
+  const width = shouldTargetAiImageHolder
     ? anchorBounds.w
     : finiteNumber(args.displayWidth, matchAnchor ? anchorBounds.w : Math.min(imageSize.width, 512));
-  const height = shouldFillAiImageHolder
+  const height = shouldTargetAiImageHolder
     ? anchorBounds.h
     : finiteNumber(
       args.displayHeight,
@@ -356,7 +381,7 @@ async function insertCowartImage(args = {}) {
   if (shouldFillAiImageHolder && anchorShape.type === "frame") {
     parentId = anchorShape.id;
     bounds = { x: 0, y: 0, w: width, h: height };
-  } else if (shouldFillAiImageHolder) {
+  } else if (shouldTargetAiImageHolder) {
     parentId = anchorShape.parentId && store[anchorShape.parentId] ? anchorShape.parentId : pageId;
     rotation = finiteNumber(anchorShape.rotation, 0);
     bounds = {
@@ -379,7 +404,13 @@ async function insertCowartImage(args = {}) {
   const recordSeed = sanitizeIdPart(fileName);
   const assetId = uniqueRecordId(store, "asset", recordSeed);
   const shapeId = uniqueRecordId(store, "shape", recordSeed);
-  const index = chooseIndex(store, parentId);
+  const replacedShapeIds = shouldReplaceAiImageHolder && anchorShapeId
+    ? [anchorShapeId, ...collectDescendantShapeIds(store, anchorShapeId)]
+    : [];
+  const replacedImageShapeIds = replacedShapeIds.filter((id) => store[id]?.typeName === "shape" && store[id]?.type === "image");
+  const index = shouldReplaceAiImageHolder && typeof anchorShape?.index === "string"
+    ? anchorShape.index
+    : chooseIndex(store, parentId);
   const mimeType = mimeTypeForFile(fileName);
 
   const assetRecord = {
@@ -402,8 +433,11 @@ async function insertCowartImage(args = {}) {
   if (anchorShapeId && !shapeMeta.cowartAnnotationSourceShapeId) {
     shapeMeta.cowartAnnotationSourceShapeId = anchorShapeId;
   }
-  if (shouldFillAiImageHolder && anchorShapeId && !shapeMeta.cowartGeneratedForAiImageHolder) {
+  if (shouldTargetAiImageHolder && anchorShapeId && !shapeMeta.cowartGeneratedForAiImageHolder) {
     shapeMeta.cowartGeneratedForAiImageHolder = anchorShapeId;
+  }
+  if (shouldReplaceAiImageHolder && anchorShapeId) {
+    shapeMeta.cowartReplacedAiImageHolder = true;
   }
   if (nonEmptyString(args.annotationScreenshot) && !shapeMeta.cowartAnnotationScreenshot) {
     shapeMeta.cowartAnnotationScreenshot = nonEmptyString(args.annotationScreenshot);
@@ -437,9 +471,21 @@ async function insertCowartImage(args = {}) {
   if (!args.dryRun) {
     await mkdir(assetsDir, { recursive: true });
     await copyFile(sourceImagePath, filePath);
+    for (const replacedShapeId of replacedShapeIds) {
+      delete store[replacedShapeId];
+    }
     store[assetId] = assetRecord;
     store[shapeId] = shapeRecord;
-    await saveCowartCanvasSnapshot(args, snapshot);
+    const saveArgs = replacedImageShapeIds.length > 0
+      ? {
+          ...args,
+          acknowledgedImageShapeDeletes: Array.from(new Set([
+            ...(Array.isArray(args.acknowledgedImageShapeDeletes) ? args.acknowledgedImageShapeDeletes : []),
+            ...replacedImageShapeIds,
+          ])),
+        }
+      : args;
+    await saveCowartCanvasSnapshot(saveArgs, snapshot);
   }
 
   return {
@@ -456,6 +502,8 @@ async function insertCowartImage(args = {}) {
     assetUrl: assetRecord.props.src,
     imageSize,
     bounds,
+    replacedAiImageHolder: shouldReplaceAiImageHolder,
+    replacedShapeIds,
     dryRun: Boolean(args.dryRun),
   };
 }
@@ -796,7 +844,7 @@ function registerCowartImageTools(mcpServer) {
     {
       title: "Insert Cowart Image",
       description:
-        "Copy a local bitmap into a Cowart page-local assets folder, create a tldraw image asset and shape, fill an AI image holder when one is targeted, otherwise place it beside an anchor or clear page area, and save the project-backed Cowart canvas.",
+        "Copy a local bitmap into a Cowart page-local assets folder, create a tldraw image asset and shape, replace a targeted AI image holder by default, otherwise place it beside an anchor or clear page area, and save the project-backed Cowart canvas.",
       inputSchema: {
         imagePath: z.string().trim(),
         projectDir: z.string().trim().optional(),
@@ -809,6 +857,7 @@ function registerCowartImageTools(mcpServer) {
         placement: z.enum(["right", "left", "below"]).optional(),
         margin: z.number().optional(),
         matchAnchor: z.boolean().optional(),
+        replaceAiImageHolder: z.boolean().optional(),
         displayWidth: z.number().optional(),
         displayHeight: z.number().optional(),
         altText: z.string().trim().optional(),
@@ -819,7 +868,7 @@ function registerCowartImageTools(mcpServer) {
       },
       annotations: {
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         idempotentHint: false,
         openWorldHint: false,
       },

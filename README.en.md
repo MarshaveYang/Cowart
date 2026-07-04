@@ -8,7 +8,7 @@ Cowart is a native infinite-canvas widget plugin for Codex. It brings a tldraw-p
 
 - Open a native tldraw infinite-canvas widget from Codex.
 - Persist canvas pages and image assets in the active project directory.
-- Create AI image holders on the canvas and ask Codex to generate images into the selected holder.
+- Create AI image holders on the canvas and ask Codex to generate images that replace the selected holder.
 - Provide Cowart annotation screenshots and let Codex generate clean revised images beside the original.
 - Use Cowart MCP tools to read selection state, save the canvas, insert images, and save page-local assets.
 
@@ -100,10 +100,10 @@ canvas/pages/<page-id>/assets/
 3. Describe the image you want Codex to generate, for example:
 
 ```text
-Generate a new image into the selected Cowart AI image holder.
+Generate a new image to replace the selected Cowart AI image holder.
 ```
 
-Codex reads the selected holder, matches its aspect ratio, generates the image, and inserts it into the holder.
+Codex reads the selected holder, matches its position and aspect ratio, generates the image, and replaces the holder with a normal image shape.
 
 ![Generate and insert a new image with Cowart](assets/generate-image.png)
 
@@ -124,7 +124,7 @@ Codex reads the notes and arrows in the screenshot, generates a clean revised im
 ## Skills
 
 - `cowart:cowart-open-canvas`: open the native Cowart canvas widget.
-- `cowart:cowart-image-gen`: insert a generated image into the selected AI image holder.
+- `cowart:cowart-image-gen`: replace the selected AI image holder with a generated image.
 - `cowart:cowart-image-edit`: generate a revised image from a user-provided Cowart annotation screenshot.
 
 ## Local Development
